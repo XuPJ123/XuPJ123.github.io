@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>二维码长文本连扫器</title>
+    <script src="https://unpkg.com/html5-qrcode"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pako/2.1.0/pako.min.js"></script>
+    <style>
+        body { font-family: sans-serif; padding: 15px; max-width: 600px; margin: 0 auto; text-align: center; }
+        #reader { width: 100%; max-width: 400px; margin: 0 auto 15px; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        .progress-box { margin-bottom: 20px; padding: 10px; background: #f8f9fa; border-radius: 8px; font-weight: bold; }
+        .part-badge { display: inline-block; padding: 5px 10px; margin: 3px; border-radius: 15px; background: #dee2e6; color: #495057; font-size: 14px; }
+        .part-badge.active { background: #28a745; color: white; }
+        textarea { width: 100%; padding: 10px; box-sizing: border-box; margin-top: 10px; border-radius: 5px; border: 1px solid #ccc; }
+        button { padding: 10px 20px; background-color: #007bff; color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 16px; margin-top: 10px;}
+    </style>
+</head>
+<body>
+
+    <h2>📷 终极连续扫码器</h2>
+    
+    <div id="reader"></div>
+    
+    <div class="progress-box" id="progressBox">
+        请对准电脑屏幕扫描二维码...
+    </div>
+
+    <textarea id="outputBox" rows="12" readonly placeholder="所有碎片收集齐后，解压的文本会瞬间出现在这里..."></textarea>
+    <button onclick="copyText()" style="display:none;" id="copyBtn">一键复制文本</button>
+
+    <script>
+        const html5QrCode = new Html5Qrcode("reader");
+        let partsData = {}; // 存储扫到的碎片
+        let expectedTotal = 0; // 总片数
+        let isComplete = false;
+
+        // 更新进度条UI
+        function updateProgressUI() {
+            if (expectedTotal === 0) return;
+            let html = `已收集碎片进度: <br>`;
+            for (let i = 1; i <= expectedTotal; i++) {
+                let statusClass = partsData[i] ? 'active' : '';
+                html += `<span class="part-badge ${statusClass}">${i} / ${expectedTotal}</span>`;
+            }
+            document.getElementById('progressBox').innerHTML = html;
+        }
+
+        // 核心解压还原逻辑
+        function finalizeAndDecode() {
+            document.getElementById('progressBox').innerHTML = "<span style='color:#28a745'>✅ 收集完毕！正在解压...</span>";
+            
+            let fullBase64 = "";
+            for (let i = 1; i <= expectedTotal; i++) {
+                fullBase64 += partsData[i];
+            }
+
+            try {
+                let binaryString = atob(fullBase64);
+                let bytes = new Uint8Array(binaryString.length);
+                for (let i = 0; i < binaryString.length; i++) { bytes[i] = binaryString.charCodeAt(i); }
+
+                let decompressed = pako.inflate(bytes);
+                let text = new TextDecoder('utf-8').decode(decompressed);
+                
+                document.getElementById('outputBox').value = text;
+                document.getElementById('copyBtn').style.display = "inline-block";
+
+                // 停止摄像头
+                html5QrCode.stop().then(() => {
+                    document.getElementById('reader').style.display = "none";
+                });
+            } catch (e) {
+                alert("解压失败: " + e.message);
+            }
+        }
+
+        // 扫码成功的回调函数
+        function onScanSuccess(decodedText) {
+            if (isComplete) return;
+
+            let regex = /ZLIB:(\d+)\/(\d+):(.*)/;
+            let match = decodedText.match(regex);
+            
+            if (match) {
+                let current = parseInt(match[1]);
+                let total = parseInt(match[2]);
+                let data = match[3];
+
+                if (expectedTotal === 0) expectedTotal = total;
+
+                // 如果这个片段还没收集过，就存起来
+                if (!partsData[current]) {
+                    partsData[current] = data;
+                    updateProgressUI();
+                    
+                    // 手机短震动反馈 (如果设备支持)
+                    if (navigator.vibrate) navigator.vibrate(100);
+
+                    // 检查是否收集齐了
+                    if (Object.keys(partsData).length === expectedTotal) {
+                        isComplete = true;
+                        finalizeAndDecode();
+                    }
+                }
+            }
+        }
+
+        // 启动摄像头
+        const config = { fps: 10, qrbox: { width: 250, height: 250 } };
+        html5QrCode.start({ facingMode: "environment" }, config, onScanSuccess)
+        .catch(err => {
+            document.getElementById('progressBox').innerHTML = `<span style="color:red">❌ 无法启动摄像头。<br>请确保在浏览器中打开，并允许摄像头权限。</span>`;
+        });
+
+        // 复制按钮
+        function copyText() {
+            let copyText = document.getElementById("outputBox");
+            copyText.select();
+            document.execCommand("copy");
+            alert("已复制到剪贴板！");
+        }
+    </script>
+
+</body>
+</html>
